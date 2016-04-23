@@ -4,7 +4,7 @@ import numpy as np
 from scipy.optimize import fmin_cobyla, fmin_slsqp, basinhopping
 from pathos.multiprocessing import ProcessingPool
 from pandas import DataFrame, Series
-from cma import CMAEvolutionStrategy
+#from cma import CMAEvolutionStrategy
 
 class QuantileForest():
     """Quantile Regresion Random Forest.
@@ -226,24 +226,7 @@ class QuantileForest():
         """
         alphai = w[self._outputSample.values <= yi].sum()
         return alphai - alpha
-
-    def findMinQuantile(self, alpha, verbose=False, seed=None):
-        """
-
-        """
-        x0 = self._inputSample.values.mean(axis=0)
-        sigma0 = self._inputSample.values.std()
-        if self._dimension > 1:
-            args = {'bounds': self._inputLimits, "seed": seed}
-            es = CMAEvolutionStrategy(x0, sigma0, args)
-            es.optimize(self.computeQuantile, verb_disp=verbose,
-                        args=([alpha]))
-            res = es.result()[0]
-        else:
-            minimizer_kwargs = {"method": "BFGS", "args": (alpha)}
-            res = basinhopping(self.computeQuantile, x0,
-                               minimizer_kwargs=minimizer_kwargs, disp=verbose)
-        return res
+    
 # ==============================================================================
 # Setters
 # ==============================================================================
@@ -372,7 +355,7 @@ class QuantileForest():
 
         return (permError - baseError)
 
-    def computeImportance(self, alpha):
+    def compute_importance(self, alpha):
         """
 
         """
@@ -388,3 +371,6 @@ def check_function(Yobs, Yest, alpha):
     """
     u = Yobs - Yest
     return u * (alpha - (u <= 0.) * 1.)
+
+if __name__ == "__main__":
+    print "oui"
