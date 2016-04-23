@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble.forest import BaseForest
 import numpy as np
 from scipy.optimize import fmin_cobyla, fmin_slsqp, basinhopping
 from pathos.multiprocessing import ProcessingPool
 from pandas import DataFrame, Series
+import pylab as plt
 #from cma import CMAEvolutionStrategy
 
 class QuantileForest():
@@ -121,10 +123,9 @@ class QuantileForest():
         """
 
         # If the inputs are scalars
-        if type(alpha) is int or type(alpha) is float:
+        if type(alpha) in [int, float]:
             alpha = [alpha]
-
-        if type(X) is int or type(X) is float:
+        if type(X) in [int, float]:
             X = [X]
 
         # Converting to array for convenience
@@ -132,52 +133,54 @@ class QuantileForest():
         alpha = np.array(alpha)
 
         # Number of quantiles to compute
-        X, numRegressor = self._checkRegressor(X)
+        X, n_quantiles = self._checkRegressor(X)
 
-        numAlpha = len(alpha)  # Number of probabilities
+        n_alphas = len(alpha)  # Number of probabilities
 
         # Matrix of computed quantiles
-        quantiles = np.zeros((numRegressor, numAlpha))
+        quantiles = np.zeros((n_quantiles, n_alphas))
 
         if doSaveCDF or not doOptim:
             self.setPrecisionOfCDF(self._n_points)
         if doSaveCDF:
-            self._CDF = np.empty((self._yCDF.size, numRegressor))
+            self._CDF = np.empty((self._yCDF.size, n_quantiles))
 
         # Nodes of the regressor in all the trees
         # Shape : (numTree * numRegressor)
         if iTree < 0:
-            nodesOfRegressor = self._forest.apply(X).transpose()
-            nodesSample = self._nodesOfSamples.values
+            X_nodes = self._forest.apply(X).transpose()
+            sample_node = self._sample_nodes.values
         else:
             tree = self._forest.estimators_[iTree].tree_
-            nodesOfRegressor = tree.apply(X.astype(np.float32))
-            nodesOfRegressor.resize((1, numRegressor))
-            nodesSample = self._nodesOfSamples.values[:, iTree]
+            X_nodes = tree.apply(X.astype(np.float32))
+            X_nodes.resize((1, n_quantiles))
+            sample_node = self._nodesOfSamples.values[:, iTree]
 
-        for k in range(numRegressor):  # For each regressor
+        # For each quantiles to compute
+        for k in range(n_quantiles):
             # Set to 1 only the samples in the same nodes the regressor,
             # Shape : Matrix (numSample * numTree)
 
-            weightPerTree = (nodesSample == nodesOfRegressor[:, k]) * 1.
-#            weightPerTree = DataFrame((nodesSample == nodesOfRegressor[:, k]) * 1.).to_sparse(fill_value=0)
-            numSampleInNode = weightPerTree.sum(axis=0)
+            tmp = (sample_node == X_nodes[:, k]).astype(int)
+
+            # Number of samples in nodes
+            n_samples_nodes = tmp.sum(axis=0)
             # The proportion in each node
             # Shape : Matrix (numSample * numTree)
-            normedWeightPerTree = weightPerTree / numSampleInNode
+            weight = tmp.astype(float) / n_samples_nodes
 
             # The weight of each sample in the trees
             # Shape : Vector (numSample * )
             if iTree < 0:
-                weight = normedWeightPerTree.sum(axis=1) / self._numTree
+                weight = weight.mean(axis=1)
             else:
-                weight = normedWeightPerTree
+                weight = weight
 
             if doOptim:  # Computation is by optimisation
                 # The starting point is taking by computing the alpha quantile
                 # of the non-null weights.
                 y0 = np.percentile(self._outputSample[
-                                   weight != 0], alpha * 100)
+                                   weight != 0], alpha * 100.)
 
                 for i, alphai in enumerate(alpha):
                     if self._optMethod == "Cobyla":
@@ -206,9 +209,9 @@ class QuantileForest():
                 if doSaveCDF:
                     self._CDF[:, k] = CDF
 
-        if numRegressor == 1 and numAlpha == 1:
+        if n_quantiles == 1 and n_alphas == 1:
             return quantiles[0][0]
-        elif numRegressor == 1 or numAlpha == 1:
+        elif n_quantiles == 1 or n_alphas == 1:
             return quantiles.ravel()
         else:
             return quantiles
@@ -297,23 +300,17 @@ class QuantileForest():
                                        n_estimators=n_estimators,
                                        min_samples_leaf=min_samples_leaf,
                                        random_state=random_state,
+                                       bootstrap=True,
                                        *more_args,
                                        **more_kwargs)
 
         self._forest = forest.fit(self._inputSample, self._outputSample)
 
-        # Nodes of each sample in all the tree
-        self._nodesOfSamples = DataFrame(self._forest.apply(self._inputSample))
-#        print self._nodesOfSamples.memory_usage().sum()
+        # The resulting node of each elements of the sample
+        self._sample_nodes = DataFrame(self._forest.apply(self._inputSample))
 
-        trees = self._forest.estimators_  # List of constructed trees
-
-        # The OOB samples are setted to -1
-        self._oobID = [-trees[i].indices_ for i in range(n_estimators)]
-        for i, oob in enumerate(self._oobID):
-            self._nodesOfSamples.values[oob, i] = -1
-
-        self._nodesOfSamples = self._nodesOfSamples.to_sparse(fill_value=-1)
+        # This is without bootstrap, then every observations have been used to
+        # build each tree.
 
         self._numTree = n_estimators  # Number of trees
         self._numJobs = n_jobs
@@ -373,4 +370,32 @@ def check_function(Yobs, Yest, alpha):
     return u * (alpha - (u <= 0.) * 1.)
 
 if __name__ == "__main__":
-    print "oui"
+    """
+    The main execution is just an example of the Quantile Regression Forest 
+    applied on a sinusoidal function with Gaussian noise.
+    """
+
+    def sin_func(X):
+        X = np.asarray(X)
+        return 3*X
+
+    dim = 1
+    n_sample = 200
+    xmin, xmax = 0., 5.
+    X = np.linspace(xmin, xmax, n_sample).reshape((n_sample, 1))
+    y = sin_func(X).ravel() + np.random.randn(n_sample)
+    
+    quantForest = QuantileForest(X, y)
+
+    n_quantiles = 10
+    alpha = 0.9
+    x = np.linspace(xmin, xmax, n_quantiles)
+    quantiles = quantForest.computeQuantile(x, alpha)
+
+    if dim == 1:
+        plt.ion()
+        fig, ax = plt.subplots()
+        ax.plot(X, y, '.k')
+        ax.plot(x, quantiles, 'ob')
+        fig.tight_layout()
+        plt.show()
