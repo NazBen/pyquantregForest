@@ -116,7 +116,7 @@ class QuantileForest(RandomForestRegressor):
         """
         Compute the conditional alpha-quantile.
         """
-        if type(X) in [int, float]:
+        if type(alpha) in [int, float]:
             alpha = [alpha]
         if type(X) in [int, float]:
             X = [X]
@@ -173,24 +173,22 @@ class QuantileForest(RandomForestRegressor):
 
             # Compute the quantile by minimising the pinball function
             if do_optim:
-                # The starting point is the percentile
+                # The starting points are the percentiles
                 # of the non-zero weights.
                 y0 = np.percentile(self._output_sample[
                                    weight != 0], alpha * 100.)
 
                 for i, alphai in enumerate(alpha):
                     if opt_method == "Cobyla":
-                        quantiles[k, i] = fmin_cobyla(self._optFunc,
-                                                      y0[i],
-                                                      [self._ieqFunc],
+                        quantiles[k, i] = fmin_cobyla(self._min_function,
+                                                      y0[i], [],
                                                       args=(weight, alphai),
                                                       disp=verbose)
 
                     elif opt_method == "SQP":
                         epsilon = 1.E-1 * abs(y0[i])
-                        quantiles[k, i] = fmin_slsqp(self._optFunc,
+                        quantiles[k, i] = fmin_slsqp(self._min_function,
                                                      y0[i],
-                                                     f_ieqcons=self._ieqFunc,
                                                      args=(weight, alphai),
                                                      disp=verbose,
                                                      epsilon=epsilon)
@@ -212,20 +210,13 @@ class QuantileForest(RandomForestRegressor):
         else:
             return quantiles
 
-    def _optFunc(self, yi, w, alpha):
-        """
-
-        """
-        alphai = w[self._output_sample.values <= yi].sum()        
-        return check_function(self._output_sample.values[w != 0], yi, alpha).sum()
-        #return abs(alphai - alpha)**2
-
-    def _ieqFunc(self, yi, w, alpha):
+    def _min_function(self, yi, w, alpha):
         """
 
         """
         alphai = w[self._output_sample.values <= yi].sum()
-        return alphai - alpha
+        u = w*(self._output_sample.values - yi)
+        return check_function(u, alpha).sum()
     
 # ==============================================================================
 # Setters
@@ -277,11 +268,10 @@ class QuantileForest(RandomForestRegressor):
         return np.array(errors).mean(axis=0)
 
 
-def check_function(y, yi, alpha):
+def check_function(u, alpha):
     """
 
     """
-    u = y - yi
     return u * (alpha - (u < 0.) * 1.)
 
 if __name__ == "__main__":
