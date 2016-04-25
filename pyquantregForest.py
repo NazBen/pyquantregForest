@@ -111,8 +111,77 @@ class QuantileForest(RandomForestRegressor):
 
         return X, n
 
+    def _compute_weight(self, X_nodes_k, i_tree):
+        """
+        """
+        if i_tree < 0:
+            sample_node = self._sample_nodes.values
+        else:
+            sample_node = self._nodesOfSamples.values[:, i_tree]
+        tmp = (sample_node == X_nodes_k)
+
+        # Number of samples in nodes
+        n_samples_nodes = tmp.sum(axis=0)
+
+        # The proportion in each node
+        # Shape : Matrix (numSample * numTree)
+        weight = tmp.astype(float) / n_samples_nodes
+
+        # The weight of each sample in the trees
+        # Shape : Vector (numSample * )
+        if i_tree < 0:
+            return weight.mean(axis=1)
+        else:
+            return weight
+
+    def get_nodes(self, X, i_tree):
+        """
+        """
+        X, n_quantiles = self._check_input(X)
+
+        # Nodes of the regressor in all the trees
+        # Shape : (numTree * numRegressor)
+        if i_tree < 0:
+            # Sklearn does not like arrays of one values...
+            if n_quantiles == 1 and self._input_dim == 1:
+                X_nodes = self.apply(X[0]).transpose()
+            else:
+                X_nodes = self.apply(X).transpose()
+        else:
+            tree = self.estimators_[i_tree].tree_
+            X_nodes = tree.apply(X.astype(np.float32))
+            X_nodes.resize((1, n_quantiles))
+
+        return X_nodes
+
+    def compute_CDF(self, X, y, i_tree=-1):
+        """
+        """
+        if type(X) in [int, float]:
+            X = [X]
+        if type(y) in [int, float]:
+            y = [y]
+
+        # Converting to array for convenience
+        X = np.asarray(X)
+        y = np.asarray(y)
+        X, n_X = self._check_input(X)
+        n_y = y.shape[0]
+        y.resize(n_y, 1)
+        
+        self._prepare_CDF()
+
+        CDFs = np.zeros((n_y, n_X))
+        X_nodes = self.get_nodes(X, i_tree)
+        for k in range(n_X):
+            weight = self._compute_weight(X_nodes[:, k], i_tree)
+            id_pos = weight > 0
+            CDFs[:, k] = (weight[id_pos] * (self._output_sample.values[id_pos] <= y)).sum(axis=1)
+        #CDF = self._infYY.dot(weight).ravel()  # Compute the CDF
+        return CDFs
+
     def computeQuantile(self, X, alpha, do_optim=True, verbose=False,
-                        doSaveCDF=False, iTree=-1, opt_method="Cobyla"):
+                        doSaveCDF=False, i_tree=-1, opt_method="Cobyla"):
         """
         Compute the conditional alpha-quantile.
         """
@@ -133,45 +202,15 @@ class QuantileForest(RandomForestRegressor):
         quantiles = np.zeros((n_quantiles, n_alphas))
 
         if doSaveCDF or not do_optim:
-            self.setPrecisionOfCDF(self._n_points)
+            self._prepare_CDF()
         if doSaveCDF:
             self._CDF = np.empty((self._yCDF.size, n_quantiles))
 
-        # Nodes of the regressor in all the trees
-        # Shape : (numTree * numRegressor)
-        if iTree < 0:
-            # Sklearn does not like arrays of one values...
-            if n_quantiles == 1 and self._input_dim == 1:
-                X_nodes = self.apply(X[0]).transpose()
-            else:
-                X_nodes = self.apply(X).transpose()
-
-            sample_node = self._sample_nodes.values
-        else:
-            tree = self.estimators_[iTree].tree_
-            X_nodes = tree.apply(X.astype(np.float32))
-            X_nodes.resize((1, n_quantiles))
-            sample_node = self._nodesOfSamples.values[:, iTree]
+        X_nodes = self.get_nodes(X, i_tree)
 
         # For each quantiles to compute
         for k in range(n_quantiles):
-            # Set to 1 only the samples in the same nodes the regressor,
-            # Shape : Matrix (numSample * numTree)
-            tmp = (sample_node == X_nodes[:, k])
-
-            # Number of samples in nodes
-            n_samples_nodes = tmp.sum(axis=0)
-
-            # The proportion in each node
-            # Shape : Matrix (numSample * numTree)
-            weight = tmp.astype(float) / n_samples_nodes
-
-            # The weight of each sample in the trees
-            # Shape : Vector (numSample * )
-            if iTree < 0:
-                weight = weight.mean(axis=1)
-            else:
-                weight = weight
+            weight = self._compute_weight(X_nodes[:, k], i_tree)
 
             # Compute the quantile by minimising the pinball function
             if do_optim:
@@ -229,22 +268,17 @@ class QuantileForest(RandomForestRegressor):
 # ==============================================================================
 # Setters
 # ==============================================================================
-    def setPrecisionOfCDF(self, n_points):
+    def _prepare_CDF(self):
         """
         If the value is set at 0, we will take the quantile from the output
         sample. Else we can create new sample to find the quantile
         """
-        if n_points == 0:  # We use the outputSample as precision vector
-            self._yCDF = self._outputSample.sort(inplace=False)
-        else:  # We create a vector
-            yymin = self._outputSample.min()
-            yymax = self._outputSample.max()
-            self._yCDF = Series(np.linspace(yymin, yymax, n_points))
+        self._yCDF = self._output_sample.sort_values(inplace=False)
 
         # Matrix of output samples inferior to a quantile value
-        outMatrix = self._outputSample.reshape(self._numSample, 1)
-        cdfMatrix = self._yCDF.reshape(self._yCDF.size, 1).T
-        self._infYY = DataFrame(outMatrix <= cdfMatrix).T
+        out_martrix = self._output_sample.reshape(self._n_sample, 1)
+        cdf_matrix = self._yCDF.reshape(self._yCDF.size, 1).T
+        self._infYY = DataFrame(out_martrix <= cdf_matrix).T
 
     def _computeImportanceOfTree(self, alpha, i):
         """
@@ -253,14 +287,14 @@ class QuantileForest(RandomForestRegressor):
         oob = self._oobID[i]
         X_oob = self._inputSample.values[oob, :]
         Yobs_oob = self._outputSample.values[oob]
-        Yest_oob = self.computeQuantile(X_oob, alpha, iTree=i)
+        Yest_oob = self.computeQuantile(X_oob, alpha, i_tree=i)
         baseError = (check_function(Yobs_oob, Yest_oob, alpha)).mean()
 
         permError = np.empty(self._input_dim)
         for j in range(self._input_dim):
             X_oob_perm = np.array(X_oob)
             np.random.shuffle(X_oob_perm[:, j])
-            Yest_oob_perm = self.computeQuantile(X_oob_perm, alpha, iTree=i)
+            Yest_oob_perm = self.computeQuantile(X_oob_perm, alpha, i_tree=i)
             permError[j] = check_function(Yobs_oob, Yest_oob_perm, alpha)\
                 .mean()
 
@@ -305,8 +339,13 @@ if __name__ == "__main__":
     alpha = 0.9
     x = np.linspace(xmin, xmax, n_quantiles)
     x = 3.
-    quantiles = quantForest.computeQuantile(x, alpha)
+    quantiles = quantForest.computeQuantile(x, alpha, do_optim=True)
     print quantiles
+    
+    x = np.linspace(xmin, xmax, n_quantiles)
+    y_cdf = np.linspace(0., 30., 50)
+    CDFs = quantForest.compute_CDF(x, y_cdf)
+    print CDFs.shape
 
     if dim == 1:
         plt.ion()
