@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble.forest import BaseForest
+from sklearn.ensemble.forest import BaseForest, ForestRegressor
 import numpy as np
 from scipy.optimize import fmin_cobyla, fmin_slsqp, basinhopping
 from pathos.multiprocessing import ProcessingPool
@@ -8,7 +8,7 @@ from pandas import DataFrame, Series
 import pylab as plt
 #from cma import CMAEvolutionStrategy
 
-class QuantileForest():
+class QuantileForest(RandomForestRegressor):
     """Quantile Regresion Random Forest.
       This class can build random forest using Scikit-Learn and compute
       conditional quantiles.
@@ -50,97 +50,89 @@ class QuantileForest():
         by np.random.
     """
 
-    def __init__(self,
-                 inputSample,
-                 outputSample,
-                 n_estimators=50,
-                 min_samples_leaf=None,
-                 n_jobs=4,
-                 n_points=0,
-                 optMethod="Cobyla",
-                 doOptim=True,
-                 random_state=None,
-                 *more_args,
-                 **more_kwargs):
 
-        self.setSample(inputSample, outputSample)
-        self.computeForest(n_estimators, min_samples_leaf, n_jobs,
-                           random_state, *more_args, **more_kwargs)
+    def fit(self, X, y):
+        """
 
-        self._n_points = n_points
-        if not doOptim:
-            self.setPrecisionOfCDF(n_points)
-        self._optMethod = optMethod  # Optimisation method
+        """
+        # We transform X as a np array for use convenience
+        X = np.asarray(X)
 
-    def _checkRegressor(self, X):
+        # It's a vector
+        if X.shape[0] == X.size:
+            self._n_sample = X.shape[0]
+            self._input_dim = 1
+        else:
+            self._n_sample, self._input_dim = X.shape
+
+        # The bootstrap is mandatory for the method. Since update 
+        # 1.16 of Sklearn, the indices of each element are not 
+        # availables. TODO: find a way to get OOB indices.
+        self.bootstrap = True
+
+        # Fit the forest
+        RandomForestRegressor.fit(self, X, y)
+
+        # Save the data. Necessary to compute the quantiles.
+        self._input_sample = DataFrame(X)
+        self._output_sample = Series(y)
+
+        # The resulting node of each elements of the sample
+        self._sample_nodes = DataFrame(self.apply(X))  
+
+        return self
+
+    def _check_input(self, X):
         """
 
         """
         n = X.shape[0]  # Number of sample
         try:  # Works if X is an array
             d = X.shape[1]  # Dimension of the array
-            if d != self._dimension:  # If the dimension is not correct
-                if n == self._dimension:  # There is one sample of d dimension
+            if d != self._input_dim:  # If the dimension is not correct
+                if n == self._input_dim:  # There is one sample of d dimension
                     d = n
                     n = 1
                 else:  # Error
                     raise ValueError("X dimension is different from forest \
-                    dimension : %d (X) != %d (forest)" % (d, self._dimension))
+                    dimension : %d (X) != %d (forest)" % (d, self._input_dim))
         except:  # Its a vector
             d = 1
-            if d != self._dimension:  # If the dimension is not correct
-                if n == self._dimension:  # There is one sample of d dimension
+            if d != self._input_dim:  # If the dimension is not correct
+                if n == self._input_dim:  # There is one sample of d dimension
                     d = n
                     n = 1
                 else:  # Error
                     raise ValueError("X dimension is different from forest \
-                    dimension : %d (X) != %d (forest)" % (d, self._dimension))
+                    dimension : %d (X) != %d (forest)" % (d, self._input_dim))
 
         if (n > 1) & (d == 1):
             X.resize(n, 1)
 
         return X, n
 
-    def setInputLimits(self, limits=None):
-        """
-        Parameter
-        ----------
-        limits
-        """
-        if not limits:
-            limits = [[-np.inf] * self._dimension, [np.inf] * self._dimension]
-        elif type(limits) is np.array:
-            limits = limits.tolist()
-        assert len(limits[0]) == self._dimension, ValueError(
-            "Limits dimension different from input sample dimension: \
-                %d(limits) != %d (input)" % (len(limits[0]), self._dimension))
-        self._inputLimits = limits
-
-    def computeQuantile(self, X, alpha, doOptim=True, verbose=False,
-                        doSaveCDF=False, iTree=-1):
+    def computeQuantile(self, X, alpha, do_optim=True, verbose=False,
+                        doSaveCDF=False, iTree=-1, opt_method="Cobyla"):
         """
         Compute the conditional alpha-quantile.
         """
-
-        # If the inputs are scalars
-        if type(alpha) in [int, float]:
+        if type(X) in [int, float]:
             alpha = [alpha]
         if type(X) in [int, float]:
             X = [X]
 
         # Converting to array for convenience
-        X = np.array(X)
-        alpha = np.array(alpha)
+        alpha = np.asarray(alpha)
+        X = np.asarray(X)
 
         # Number of quantiles to compute
-        X, n_quantiles = self._checkRegressor(X)
-
-        n_alphas = len(alpha)  # Number of probabilities
+        X, n_quantiles = self._check_input(X)
+        n_alphas = alpha.size  # Number of probabilities
 
         # Matrix of computed quantiles
         quantiles = np.zeros((n_quantiles, n_alphas))
 
-        if doSaveCDF or not doOptim:
+        if doSaveCDF or not do_optim:
             self.setPrecisionOfCDF(self._n_points)
         if doSaveCDF:
             self._CDF = np.empty((self._yCDF.size, n_quantiles))
@@ -148,10 +140,13 @@ class QuantileForest():
         # Nodes of the regressor in all the trees
         # Shape : (numTree * numRegressor)
         if iTree < 0:
-            X_nodes = self._forest.apply(X).transpose()
+            if n_quantiles == 1 and self._input_dim == 1:
+                X_nodes = self.apply(X[0]).transpose()
+            else:
+                X_nodes = self.apply(X).transpose()
             sample_node = self._sample_nodes.values
         else:
-            tree = self._forest.estimators_[iTree].tree_
+            tree = self.estimators_[iTree].tree_
             X_nodes = tree.apply(X.astype(np.float32))
             X_nodes.resize((1, n_quantiles))
             sample_node = self._nodesOfSamples.values[:, iTree]
@@ -160,11 +155,11 @@ class QuantileForest():
         for k in range(n_quantiles):
             # Set to 1 only the samples in the same nodes the regressor,
             # Shape : Matrix (numSample * numTree)
-
-            tmp = (sample_node == X_nodes[:, k]).astype(int)
+            tmp = (sample_node == X_nodes[:, k])
 
             # Number of samples in nodes
             n_samples_nodes = tmp.sum(axis=0)
+
             # The proportion in each node
             # Shape : Matrix (numSample * numTree)
             weight = tmp.astype(float) / n_samples_nodes
@@ -176,21 +171,22 @@ class QuantileForest():
             else:
                 weight = weight
 
-            if doOptim:  # Computation is by optimisation
-                # The starting point is taking by computing the alpha quantile
-                # of the non-null weights.
-                y0 = np.percentile(self._outputSample[
+            # Compute the quantile by minimising the pinball function
+            if do_optim:
+                # The starting point is the percentile
+                # of the non-zero weights.
+                y0 = np.percentile(self._output_sample[
                                    weight != 0], alpha * 100.)
 
                 for i, alphai in enumerate(alpha):
-                    if self._optMethod == "Cobyla":
+                    if opt_method == "Cobyla":
                         quantiles[k, i] = fmin_cobyla(self._optFunc,
                                                       y0[i],
                                                       [self._ieqFunc],
                                                       args=(weight, alphai),
                                                       disp=verbose)
 
-                    elif self._optMethod == "SQP":
+                    elif opt_method == "SQP":
                         epsilon = 1.E-1 * abs(y0[i])
                         quantiles[k, i] = fmin_slsqp(self._optFunc,
                                                      y0[i],
@@ -200,8 +196,8 @@ class QuantileForest():
                                                      epsilon=epsilon)
 
                     else:
-                        raise Exception("Unknow optimisation method %s" %
-                                        self._optMethod)
+                        raise ValueError("Unknow optimisation method %s" %
+                                         opt_method)
             else:
                 CDF = self._infYY.dot(weight).ravel()  # Compute the CDF
                 quantiles[k, :] = [self._yCDF.values[CDF >= alphai][0]
@@ -220,101 +216,20 @@ class QuantileForest():
         """
 
         """
-        alphai = w[self._outputSample.values <= yi].sum()
-        return abs(alphai - alpha)**2
+        alphai = w[self._output_sample.values <= yi].sum()        
+        return check_function(self._output_sample.values[w != 0], yi, alpha).sum()
+        #return abs(alphai - alpha)**2
 
     def _ieqFunc(self, yi, w, alpha):
         """
 
         """
-        alphai = w[self._outputSample.values <= yi].sum()
+        alphai = w[self._output_sample.values <= yi].sum()
         return alphai - alpha
     
 # ==============================================================================
 # Setters
 # ==============================================================================
-
-    def setInputSample(self, inputSample):
-        """
-
-        """
-        typeInput = type(inputSample)
-        error = ValueError("Don't build a Forest with only one sample...")
-
-        assert typeInput is not int or typeInput is not float, error
-
-        if type(inputSample) is not DataFrame:
-            inputSample = DataFrame(inputSample)
-
-        assert inputSample.shape[0] > 1, error
-
-        self._inputSample = inputSample
-        [self._numSample, self._dimension] = inputSample.shape
-        self.setInputLimits()
-
-    def setOutputSample(self, outputSample):
-        """
-
-        """
-        typeInput = type(outputSample)
-        error = ValueError("Don't build a Forest with only one sample...")
-
-        assert typeInput is not int or typeInput is not float, error
-
-        if type(outputSample) is not Series:
-            outputSample = Series(outputSample.ravel())
-
-        assert outputSample.shape[0] > 1, error
-
-        self._outputSample = outputSample
-
-    def setSample(self, inputSample, outputSample):
-        """
-
-        """
-
-        self.setInputSample(inputSample)
-        self.setOutputSample(outputSample)
-        numSample = outputSample.shape[0]
-        if numSample != self._numSample:
-            raise ValueError("Different size of input and output sample %d(in)\
-            != %d(out)" % (numSample, self._numSample))
-
-    def computeForest(self,
-                      n_estimators=50,
-                      min_samples_leaf=None,
-                      n_jobs=4,
-                      random_state=None,
-                      *more_args,
-                      **more_kwargs):
-        """
-
-        """
-
-        # Minimum number of sample in a leaf
-        if not min_samples_leaf:
-            min_samples_leaf = max(10, self._numSample / 100)
-
-        # Sklearn regressor forest object created
-        forest = RandomForestRegressor(n_jobs=n_jobs,
-                                       n_estimators=n_estimators,
-                                       min_samples_leaf=min_samples_leaf,
-                                       random_state=random_state,
-                                       bootstrap=True,
-                                       *more_args,
-                                       **more_kwargs)
-
-        self._forest = forest.fit(self._inputSample, self._outputSample)
-
-        # The resulting node of each elements of the sample
-        self._sample_nodes = DataFrame(self._forest.apply(self._inputSample))
-
-        # This is without bootstrap, then every observations have been used to
-        # build each tree.
-
-        self._numTree = n_estimators  # Number of trees
-        self._numJobs = n_jobs
-
     def setPrecisionOfCDF(self, n_points):
         """
         If the value is set at 0, we will take the quantile from the output
@@ -342,8 +257,8 @@ class QuantileForest():
         Yest_oob = self.computeQuantile(X_oob, alpha, iTree=i)
         baseError = (check_function(Yobs_oob, Yest_oob, alpha)).mean()
 
-        permError = np.empty(self._dimension)
-        for j in range(self._dimension):
+        permError = np.empty(self._input_dim)
+        for j in range(self._input_dim):
             X_oob_perm = np.array(X_oob)
             np.random.shuffle(X_oob_perm[:, j])
             Yest_oob_perm = self.computeQuantile(X_oob_perm, alpha, iTree=i)
@@ -362,12 +277,12 @@ class QuantileForest():
         return np.array(errors).mean(axis=0)
 
 
-def check_function(Yobs, Yest, alpha):
+def check_function(y, yi, alpha):
     """
 
     """
-    u = Yobs - Yest
-    return u * (alpha - (u <= 0.) * 1.)
+    u = y - yi
+    return u * (alpha - (u < 0.) * 1.)
 
 if __name__ == "__main__":
     """
@@ -378,19 +293,22 @@ if __name__ == "__main__":
     def sin_func(X):
         X = np.asarray(X)
         return 3*X
-
+    
+    np.random.seed(0)
     dim = 1
     n_sample = 200
     xmin, xmax = 0., 5.
     X = np.linspace(xmin, xmax, n_sample).reshape((n_sample, 1))
     y = sin_func(X).ravel() + np.random.randn(n_sample)
     
-    quantForest = QuantileForest(X, y)
+    quantForest = QuantileForest().fit(X, y)
 
     n_quantiles = 10
     alpha = 0.9
     x = np.linspace(xmin, xmax, n_quantiles)
+    x = 3.
     quantiles = quantForest.computeQuantile(x, alpha)
+    print quantiles
 
     if dim == 1:
         plt.ion()
