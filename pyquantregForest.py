@@ -140,10 +140,12 @@ class QuantileForest(RandomForestRegressor):
         # Nodes of the regressor in all the trees
         # Shape : (numTree * numRegressor)
         if iTree < 0:
+            # Sklearn does not like arrays of one values...
             if n_quantiles == 1 and self._input_dim == 1:
                 X_nodes = self.apply(X[0]).transpose()
             else:
                 X_nodes = self.apply(X).transpose()
+
             sample_node = self._sample_nodes.values
         else:
             tree = self.estimators_[iTree].tree_
@@ -178,7 +180,10 @@ class QuantileForest(RandomForestRegressor):
                 y0 = np.percentile(self._output_sample[
                                    weight != 0], alpha * 100.)
 
+                # For each alpha
                 for i, alphai in enumerate(alpha):
+                    # The quantile is obtain by the minimisation of the
+                    # weighted check function.
                     if opt_method == "Cobyla":
                         quantiles[k, i] = fmin_cobyla(self._min_function,
                                                       y0[i], [],
@@ -192,7 +197,6 @@ class QuantileForest(RandomForestRegressor):
                                                      args=(weight, alphai),
                                                      disp=verbose,
                                                      epsilon=epsilon)
-
                     else:
                         raise ValueError("Unknow optimisation method %s" %
                                          opt_method)
@@ -212,9 +216,13 @@ class QuantileForest(RandomForestRegressor):
 
     def _min_function(self, yi, w, alpha):
         """
-
+        Minimisation function used to compute the conditional quantiles.
+        The function need the curret value of $y$, the weight of each observation
+        and the alpha value. The check function of the residual between $y_i$ and the
+        output sample, pondered with the weight is minimised.
         """
-        alphai = w[self._output_sample.values <= yi].sum()
+        # Weighted deviation between the current value and the output sample.
+        # TODO: Think about using only the non-null weight to increases performances
         u = w*(self._output_sample.values - yi)
         return check_function(u, alpha).sum()
     
