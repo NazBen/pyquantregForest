@@ -14,6 +14,7 @@
 # Visual Studio project files
 *.pyproj
 *.sln
+*.suo
 
 # Files from Google Drive
 *.ini
