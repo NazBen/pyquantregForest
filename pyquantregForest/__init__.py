@@ -1,1 +1,3 @@
-from pyquantregForest import QuantileForest
+﻿from .pyquantregForest import QuantileForest
+
+__all__ = ["QuantileForest"]

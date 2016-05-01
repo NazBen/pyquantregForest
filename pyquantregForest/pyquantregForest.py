@@ -1,10 +1,21 @@
-from sklearn.ensemble import RandomForestRegressor
+﻿from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble.forest import BaseForest, ForestRegressor
 import numpy as np
-from scipy.optimize import fmin_cobyla, fmin_slsqp, basinhopping
+from scipy.optimize import fmin_cobyla, fmin_slsqp
 from pathos.multiprocessing import ProcessingPool
 from pandas import DataFrame, Series
 import pylab as plt
+
+__all__ = ["QuantileForest"]
+
+# =============================================================================
+# Types and constants
+# =============================================================================
+
+
+# =============================================================================
+# Base regression forest
+# =============================================================================
 
 class QuantileForest(RandomForestRegressor):
     """Quantile Regresion Random Forest.
@@ -155,9 +166,9 @@ class QuantileForest(RandomForestRegressor):
     def compute_CDF(self, X, y, i_tree=-1):
         """
         """
-        if type(X) in [int, float]:
+        if isinstance(X, (int, float)):
             X = [X]
-        if type(y) in [int, float]:
+        if isinstance(y, (int, float)):
             y = [y]
 
         # Converting to array for convenience
@@ -171,11 +182,13 @@ class QuantileForest(RandomForestRegressor):
 
         CDFs = np.zeros((n_y, n_X))
         X_nodes = self.get_nodes(X, i_tree)
+
+        # For each fixed X
         for k in range(n_X):
             weight = self._compute_weight(X_nodes[:, k], i_tree)
             id_pos = weight > 0
-            CDFs[:, k] = (weight[id_pos] * (self._output_sample.values[id_pos] <= y)).sum(axis=1)
-        #CDF = self._infYY.dot(weight).ravel()  # Compute the CDF
+            tmp = weight[id_pos] * (self._output_sample.values[id_pos])
+            CDFs[:, k] = (tmp <= y).sum(axis=1)
         return CDFs
 
     def computeQuantile(self, X, alpha, do_optim=True, verbose=False,
@@ -183,9 +196,9 @@ class QuantileForest(RandomForestRegressor):
         """
         Compute the conditional alpha-quantile.
         """
-        if type(alpha) in [int, float]:
+        if isinstance(alpha, float):
             alpha = [alpha]
-        if type(X) in [int, float]:
+        if isinstance(X, (int, float)):
             X = [X]
 
         # Converting to array for convenience
@@ -313,42 +326,3 @@ def check_function(u, alpha):
 
     """
     return u * (alpha - (u < 0.) * 1.)
-
-if __name__ == "__main__":
-    """
-    The main execution is just an example of the Quantile Regression Forest 
-    applied on a sinusoidal function with Gaussian noise.
-    """
-
-    def sin_func(X):
-        X = np.asarray(X)
-        return 3*X
-    
-    np.random.seed(0)
-    dim = 1
-    n_sample = 200
-    xmin, xmax = 0., 5.
-    X = np.linspace(xmin, xmax, n_sample).reshape((n_sample, 1))
-    y = sin_func(X).ravel() + np.random.randn(n_sample)
-    
-    quantForest = QuantileForest().fit(X, y)
-
-    n_quantiles = 10
-    alpha = 0.9
-    x = np.linspace(xmin, xmax, n_quantiles)
-    x = 3.
-    quantiles = quantForest.computeQuantile(x, alpha, do_optim=True)
-    print quantiles
-    
-    x = np.linspace(xmin, xmax, n_quantiles)
-    y_cdf = np.linspace(0., 30., 50)
-    CDFs = quantForest.compute_CDF(x, y_cdf)
-    print CDFs.shape
-
-    if dim == 1:
-        plt.ion()
-        fig, ax = plt.subplots()
-        ax.plot(X, y, '.k')
-        ax.plot(x, quantiles, 'ob')
-        fig.tight_layout()
-        plt.show()
