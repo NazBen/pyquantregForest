@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble.forest import BaseForest, ForestRegressor
 import numpy as np
@@ -6,7 +5,6 @@ from scipy.optimize import fmin_cobyla, fmin_slsqp, basinhopping
 from pathos.multiprocessing import ProcessingPool
 from pandas import DataFrame, Series
 import pylab as plt
-#from cma import CMAEvolutionStrategy
 
 class QuantileForest(RandomForestRegressor):
     """Quantile Regresion Random Forest.

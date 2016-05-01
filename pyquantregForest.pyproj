@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>21053dec-d2dd-4025-8ab3-0212fab66064</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>pyquantregForest.py</StartupFile>
+    <StartupFile>pyquantregForest\pyquantregForest.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -22,7 +22,16 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="pyquantregForest.py" />
+    <Compile Include="pyquantregForest\pyquantregForest.py" />
+    <Compile Include="pyquantregForest\__init__.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="setup.py">
+      <SubType>Code</SubType>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="pyquantregForest\" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
