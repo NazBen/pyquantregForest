@@ -19,6 +19,9 @@
 # Files from Google Drive
 *.ini
 
+# Setuptools files
+*.egg-info
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

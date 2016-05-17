@@ -1,4 +1,5 @@
-﻿from sklearn.ensemble import RandomForestRegressor
+﻿# -*- coding: utf-8 -*-
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble.forest import BaseForest, ForestRegressor
 import numpy as np
 from scipy.optimize import fmin_cobyla, fmin_slsqp
