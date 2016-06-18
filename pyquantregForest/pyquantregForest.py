@@ -60,7 +60,6 @@ class QuantileForest(RandomForestRegressor):
         by np.random.
     """
 
-
     def fit(self, X, y):
         """
 
@@ -78,7 +77,7 @@ class QuantileForest(RandomForestRegressor):
         # The bootstrap is mandatory for the method. Since update 
         # 1.16 of Sklearn, the indices of each element are not 
         # availables. TODO: find a way to get OOB indices.
-        self.bootstrap = True
+        self.bootstrap = False
 
         # Fit the forest
         RandomForestRegressor.fit(self, X, y)
@@ -192,8 +191,8 @@ class QuantileForest(RandomForestRegressor):
             CDFs[:, k] = (tmp <= y).sum(axis=1)
         return CDFs
 
-    def computeQuantile(self, X, alpha, do_optim=True, verbose=False,
-                        doSaveCDF=False, i_tree=-1, opt_method="Cobyla"):
+    def compute_quantile(self, X, alpha, do_optim=True, verbose=False,
+                         doSaveCDF=False, i_tree=-1, opt_method="Cobyla"):
         """
         Compute the conditional alpha-quantile.
         """
