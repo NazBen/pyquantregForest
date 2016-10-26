@@ -187,8 +187,9 @@ class QuantileForest(RandomForestRegressor):
         for k in range(n_X):
             weight = self._compute_weight(X_nodes[:, k], i_tree)
             id_pos = weight > 0
-            tmp = weight[id_pos] * (self._output_sample.values[id_pos])
-            CDFs[:, k] = (tmp <= y).sum(axis=1)
+            tmp = weight[id_pos] * (self._output_sample.values[id_pos] <= y)
+            CDFs[:, k] = tmp.sum(axis=1)
+            print tmp
         return CDFs
 
     def compute_quantile(self, X, alpha, do_optim=True, verbose=False,
